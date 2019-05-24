@@ -1,0 +1,13 @@
+L=14; % n´umero de trabalhadores dispon´ıveis
+no=3; % n´umero de ordens
+njo=[2,3,2]; % n´umero de jobs por ordem
+% os jobs de 1 a njo[1] est~ao na ordem 1. Para i > 2,
+% os jobs de njo[i-1]+1 a njo[i] est~ao na ordem.
+djo=[4,2,2]; % dura¸c~ao dos jobs nas ordens
+trab=[3,2,6,12,6,3,4,3]; % perfil de demanda de trabalhadores das ordens:
+% as djo[1] primeiras posi¸c~oes descrevem o perfil de
+% trabalhadores para jobs da ordem 1, as djo[2] posi¸c~oes
+% seguintes o perfil da ordem 2 e assim por diante.
+nprec=2; % n´umero de preced^encias entre jobs de ordens diferentes
+prec=[| 1, 3, % preced^encia entre jobs de ordens diferentes, uma por
+| 3, 7 |]; % linha.
