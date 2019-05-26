@@ -37,14 +37,17 @@ array[nprecIndex, 1 .. 2] of par int: prec; % precedence between jobs of
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 par int: nj = sum(njo); % total number of jobs
 
+set of int: indexJob  = 1..nj; % index set of jobs
+
+set of int: indexTime = 0..sum(i in 1..no) (njo[i] * djo[i]); % index time jobs
+
 array[1 .. nj] of par int: durationJob = [djo[i] | i in 1 .. no, j in 1 .. njo[i]];
 
-set of int: indexJob  = 1..nj;
+array[1 .. nj] of par int: mappedOrder = [i | i in 1 .. no, j in 1 .. njo[i]];
 
-set of int: indexOrd  = 1..no;
+array[1 .. no] of par int: firstTrabOrder = 
+            [if o > 1 then sum(i in 1 .. o-1)(djo[i]) + 1 else 1 endif | o in 1 .. no];
 
-set of int: indexTime = 0..sum(i in indexOrd) (njo[i] * djo[i]); % maximum index
-                                                                 % time jobs
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % DECISION VARIABLES DECLARATION                                                     %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -58,28 +61,23 @@ var int: makespan = max(j in indexJob)(jobStartTime[j] + durationJob[j]);
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % definir quem sao os trabalhadores em cada tempo t (atraves de uma constraint)
+constraint forall(t in indexTime)(trabTime[t] = sum(j in indexJob 
+       where jobStartTime[j] <= t /\ jobStartTime[j] + durationJob[j] > t)
+               (trab[firstTrabOrder[mappedOrder[j]] + (t - jobStartTime[j])])
+);
 
-% VERIFICAR SE O PROBLEMA PEDE ISTO =>> forcar com que jobs num mesmo pedido, executem em sequencia??? 
+% For all job (j, k) in the same order, k can begin only after job j finish
+constraint forall(j, k in indexJob where j < k /\ mappedOrder[j] = mappedOrder[k])
+      (jobStartTime[j] + durationJob[j] <= jobStartTime[k]);
 
 % the job schedule must respect the given precedence relation
 constraint forall(p in nprecIndex)
      (jobStartTime[prec[p, 1]] + durationJob[prec[p, 1]] <= jobStartTime[prec[p, 2]]);
 
-% constraint that joins number of workers in every instant of time with the start 
-% time of a job
-% probably something like forall jobs and forall times, number of workers in a 
-% time equal the sum of workers a job needs in that time
-% probably requeires a binary 2d array where lines are all the times and
-% columns are all the jobs so the (i,j) position indicates
-% the jth job is/isnt (1/0) being processed in the ith time
-% possible start base
-% constraint forall(i in indexTime)(forall(j in indexJob)(x));
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % OPTIMIZATION:                                                                      %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Minimize makespan (i.e, minimize the time of the last finished job j)
-solve minimize(makespan); 
+solve minimize(makespan);  % minimize the time of the last finished job j
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % OUTPUT:                                                                            %
