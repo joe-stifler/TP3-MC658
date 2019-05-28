@@ -6,15 +6,12 @@
 % PED: Natanael Ramos                                                                %
 % Professor: Cid C. de Souza                                                         %
 % Data of creation: May 24, 2019                                                     %
-% Author (RA 176665): Jose Ribeiro Neto <j176665@dac.unicamp.br>                     %
-% Author (RA 171119): Felipe Lopes De Mello <f171119@dac.unicamp.br>                 %
+% Author (RA 176665): Jose Ribeiro Neto <j176665@dac.unicamp.br>                    %
+% Author (RA 171119): Felipe Lopes De Mello <f171119@dac.unicamp.br>                %
 %                                                                                    %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % PARAMETERS RELATED WITH THE INPUT (DO NOT MODIFY THEIR NAMES):                     %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-include "disjunctive.mzn";
-
 par int: L;  % number of available workers
 
 par int: no; % number of orders
@@ -35,7 +32,6 @@ set of int: nprecIndex = 1 .. nprec;
 
 array[nprecIndex, 1 .. 2] of par int: prec; % precedence between jobs of
                                             % different  orders, one per line
-                                            
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % AUXILIARY PARAMETERS (USED IN THE CONSTRAINTS AND OPTMIZATION):                    %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -49,7 +45,7 @@ array[1 .. nj] of par int: mappedOrder = [i | i in 1 .. no, j in 1 .. njo[i]];
 
 array[1 .. no] of par int: firstTrabOrder = 
             [if o > 1 then sum(i in 1 .. o-1)(djo[i]) + 1 else 1 endif | o in 1 .. no];
-
+            
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % INDEXTIME WITH RESTRICT DOMAIN                                                    %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -71,43 +67,48 @@ set of int: indexTime = 0..(sum(i in 1..no) (njo[i] * djo[i]))-remove; % index t
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % DECISION VARIABLES DECLARATION                                                     %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+var indexTime: makespan;
+
 array[indexJob] of var indexTime: jobStartTime;  % time instant of the start of a job
-
-array[indexTime] of var 0 .. L: trabTime;  % number workers in every instant of time
-
-var int: makespan = max(j in indexJob)(jobStartTime[j] + durationJob[j]);
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % CONSTRAINTS:                                                                       %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+predicate no_overlap(var int:s1, var int:d1, var int:s2) = (s1 + d1 <= s2);
 
 % definir quem sao os trabalhadores em cada tempo t (atraves de uma constraint)
-constraint forall(t in indexTime)(trabTime[t] = sum(j in indexJob 
+constraint forall(t in indexTime)(sum(j in indexJob 
        where jobStartTime[j] <= t /\ jobStartTime[j] + durationJob[j] > t)
-               (trab[firstTrabOrder[mappedOrder[j]] + (t - jobStartTime[j])])
+               (trab[firstTrabOrder[mappedOrder[j]] + (t - jobStartTime[j])]) <= L
 );
 
 % For all job (j, k) in the same order, k can begin only after job j finish
-constraint forall(j, k in indexJob where j < k /\ mappedOrder[j] = mappedOrder[k])
-      (jobStartTime[j] + durationJob[j] <= jobStartTime[k]);
+constraint forall(j in indexJob)(no_overlap(jobStartTime[j], durationJob[j], makespan) 
+    /\ (if j != nj /\ mappedOrder[j] = mappedOrder[j + 1] 
+          then no_overlap(jobStartTime[j], durationJob[j], jobStartTime[j + 1]) else true endif));
+
+include "disjunctive.mzn";
 
 % For all job(j, k) in the same order, j and k cant overlap in time
 constraint forall(o in 1..no) (
-                 disjunctive([jobStartTime[j] | j in indexJob where o = mappedOrder[j]], [durationJob[j] | j in indexJob where o = mappedOrder[j]])
-           );
+     disjunctive([jobStartTime[j] | j in indexJob where o = mappedOrder[j]], [durationJob[j] | j in indexJob where o = mappedOrder[j]]));
 
 % the job schedule must respect the given precedence relation
 constraint forall(p in nprecIndex)
-     (jobStartTime[prec[p, 1]] + durationJob[prec[p, 1]] <= jobStartTime[prec[p, 2]]);
+     (no_overlap(jobStartTime[prec[p, 1]], durationJob[prec[p, 1]], jobStartTime[prec[p, 2]]));
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % OPTIMIZATION:                                                                      %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-solve :: int_search(jobStartTime, dom_w_deg, indomain_min, complete) minimize(makespan);  % minimize the time of the last finished job j
+% minimize the time of the last finished job j
+% solve :: int_search(jobStartTime, dom_w_deg, indomain_min, complete) minimize(makespan);  
+
+solve :: seq_search([
+      int_search(jobStartTime, smallest, indomain_min, complete),
+      int_search([makespan], smallest, indomain_min, complete)])
+      minimize(makespan);  % minimize the time of the last finished job j
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % OUTPUT:                                                                            %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 output["\(makespan)\n"];
 output["\(j) \(jobStartTime[j])\n" | j in indexJob];
-%output["Numero de trabalhadores:\n"];
-%output["\(j) \(trabTime[j])\n" | j in indexTime];
