@@ -70,12 +70,21 @@ array[indexJob] of var indexTime: jobStartTime;  % time of beggining of each tas
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 predicate no_overlap(var int:s1, var int:d1, var int:s2) = (s1 + d1 <= s2);
 
-% 1) For all job (j, k) in the same order, j and k cannot overlap in time
-constraint forall(j in indexJob)(no_overlap(jobStartTime[j], durationJob[j], makespan) 
-    /\ (if j != nj /\ mappedOrder[j] = mappedOrder[j + 1] 
-          then no_overlap(jobStartTime[j], durationJob[j], jobStartTime[j + 1]) else true endif));
+% 1) For all job (j, k) in the same order, j and k cannot overlap in time and makespan must be 
+%    less than or equal the end time of all jobs
+%constraint forall(j in indexJob)(no_overlap(jobStartTime[j], durationJob[j], makespan) 
+%    /\ (if j != nj /\ mappedOrder[j] = mappedOrder[j + 1] 
+%          then no_overlap(jobStartTime[j], durationJob[j], jobStartTime[j + 1]) else true endif));
 
-% 2) For all job(j, k) in the same order, j and k cannot overlap in time (redundant with constraint 1)
+% The following code is a better approach than the previous
+% 1) For all job (j, k) in the same order, j and k cannot overlap in time
+constraint forall(j in indexJob, k in indexJob where j < k /\ mappedOrder[j] = mappedOrder[k])
+                (no_overlap(jobStartTime[j], durationJob[j], jobStartTime[k]));
+
+% 2) Makespan must be higher than or equal to the end time of all jobs
+constraint forall(j in indexJob) (no_overlap(jobStartTime[j],durationJob[j],makespan));
+
+% 3) For all job(j, k) in the same order, j and k cannot overlap in time (redundant with constraint 1)
 constraint forall(o in 1..no) (
       disjunctive(
           [jobStartTime[j] | j in indexJob where o = mappedOrder[j]],
@@ -83,11 +92,11 @@ constraint forall(o in 1..no) (
       )
 );
 
-% 3) the job schedule must respect the given precedence relation
+% 4) the job schedule must respect the given precedence relation
 constraint forall(p in nprecIndex)
      (no_overlap(jobStartTime[prec[p, 1]], durationJob[prec[p, 1]], jobStartTime[prec[p, 2]]));
 
-% 4) for each possible time, the running jobs cannot use more than L workers
+% 5) for each possible time, the running jobs cannot use more than L workers
 % constraint forall(t in 0..makespan)(
 %     sum(j in indexJob where jobStartTime[j] <= t 
 %               /\ jobStartTime[j] + durationJob[j] > t)
@@ -95,7 +104,7 @@ constraint forall(p in nprecIndex)
 % );
 
 % The following code is a better approach than the previous
-% 4) for each possible time, the running jobs cannot use more than L workers
+% 5) for each possible time, the running jobs cannot use more than L workers
 constraint forall(job in indexJob, d in 0..djo[mappedOrder[job]]-1)(
       let {var int: t = jobStartTime[job] + d} in
           sum(j in indexJob where jobStartTime[j] <= t 
@@ -103,7 +112,7 @@ constraint forall(job in indexJob, d in 0..djo[mappedOrder[job]]-1)(
                      (trab[firstTrabOrder[mappedOrder[j]] + (t - jobStartTime[j])]) <= L
 );
 
-% 5) for each possible time, the running jobs cannot use more than L workers (redundant with constraint 4)
+% 6) for each possible time, the running jobs cannot use more than L workers (redundant with constraint 4)
 % constraint cumulative(
 %     [jobStartTime[j] + d | j in indexJob, d in 0..djo[mappedOrder[j]]-1], 
 %     taskDuration, 
