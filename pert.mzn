@@ -13,8 +13,8 @@
 % PARAMETERS RELATED WITH THE INPUT (DO NOT MODIFY THEIR NAMES):                     %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-include "disjunctive.mzn";
 include "cumulative.mzn";
+include "disjunctive.mzn";
 
 par int: L;  % number of available workers
 
@@ -43,6 +43,8 @@ par int: nj = sum(njo); % total number of jobs
 
 set of int: indexJob  = 1..nj; % index set of jobs
 
+set of int: indexTime = 0..sum(i in 1..no) (njo[i] * djo[i]); % index time jobs
+
 array[1 .. nj] of par int: durationJob = [djo[i] | i in 1 .. no, j in 1 .. njo[i]];
 
 array[1 .. nj] of par int: mappedOrder = [i | i in 1 .. no, j in 1 .. njo[i]];
@@ -50,84 +52,78 @@ array[1 .. nj] of par int: mappedOrder = [i | i in 1 .. no, j in 1 .. njo[i]];
 array[1 .. no] of par int: firstTrabOrder = 
             [if o > 1 then sum(i in 1 .. o-1)(djo[i]) + 1 else 1 endif | o in 1 .. no];
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% INDEXTIME WITH RESTRICT DOMAIN                                                     %
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Old version
-% set of int: indexTime = 0..sum(i in 1..no) (njo[i] * djo[i]); % index time jobs
-
-% Get all orders that can be executed at the same time
-array[1 .. no] of par 0..1: smallOrd = 
-            [if max(j in 0..djo[o]-1)(trab[firstTrabOrder[o]+j]) <= L/2 then 1 else 0 endif | o in 1 .. no];
-
-% Number of orders that can be executed at the same time
-int: nSmallOrd = sum(smallOrd);
-
-% Remove the time necessary for half of this orders, assuming their time as the shortest order 
-int: remove = floor(nSmallOrd * min(i in 1..no where smallOrd[i] = 1) (njo[i] * djo[i]) / 2);
-
-set of int: indexTime = 0..(sum(i in 1..no) (njo[i] * djo[i]))-remove; % index time jobs
+% set of int: indexTask = 1..(sum(i in 1..no) (njo[i] * djo[i]));
+% array[indexTask] of par int: mappedJob = [i | i in indexJob, j in 1 .. djo[mappedOrder[i]]];
+% array[indexTask] of 0..L: taskWorkers = [trab[firstTrabOrder[mappedOrder[j]]+k] | j in indexJob, k in 0..djo[mappedOrder[j]]-1];
+% array[indexTask] of 0..1: taskDuration = [1 | i in indexTask];
+% array[indexJob] of par int: firstTaskJob = [if t > 1 then sum(i in 1 .. t-1)(durationJob[i]) + 1 else 1 endif | t in indexJob];
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % DECISION VARIABLES DECLARATION                                                     %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-var indexTime: makespan;
+var indexTime: makespan; % the time that the last task will finish
 
-array[indexJob] of var indexTime: jobStartTime;  % time instant of the start of a job
-
-set of int: indexTask = 1..(sum(i in 1..no) (njo[i] * djo[i]));
-array[indexTask] of par int: mappedJob = [i | i in indexJob, j in 1 .. djo[mappedOrder[i]]];
-array[indexTask] of 0..L: taskWorkers = [trab[firstTrabOrder[mappedOrder[j]]+k] | j in indexJob, k in 0..djo[mappedOrder[j]]-1];
-array[indexTask] of var indexTime: taskStartTime;  % time instant of the start of a task
-array[indexTask] of 0..1: taskDuration = [1 | i in indexTask];
-array[indexJob] of par int: firstTaskJob = 
-            [if t > 1 then sum(i in 1 .. t-1)(durationJob[i]) + 1 else 1 endif | t in indexJob];
+array[indexJob] of var indexTime: jobStartTime;  % time of beggining of each task
             
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % CONSTRAINTS:                                                                       %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 predicate no_overlap(var int:s1, var int:d1, var int:s2) = (s1 + d1 <= s2);
 
-% definir quem sao os trabalhadores em cada tempo t (atraves de uma constraint)
-constraint forall(t in indexTime)(sum(j in indexJob 
-       where jobStartTime[j] <= t /\ jobStartTime[j] + durationJob[j] > t)
-               (trab[firstTrabOrder[mappedOrder[j]] + (t - jobStartTime[j])]) <= L
-);
-
-% For all job (j, k) in the same order, k can begin only after job j finish
+% 1) For all job (j, k) in the same order, j and k cannot overlap in time
 constraint forall(j in indexJob)(no_overlap(jobStartTime[j], durationJob[j], makespan) 
     /\ (if j != nj /\ mappedOrder[j] = mappedOrder[j + 1] 
           then no_overlap(jobStartTime[j], durationJob[j], jobStartTime[j + 1]) else true endif));
 
-% For all job(j, k) in the same order, j and k cant overlap in time
+% 2) For all job(j, k) in the same order, j and k cannot overlap in time (redundant with constraint 1)
 constraint forall(o in 1..no) (
-     disjunctive([jobStartTime[j] | j in indexJob where o = mappedOrder[j]], [durationJob[j] | j in indexJob where o = mappedOrder[j]]));
+      disjunctive(
+          [jobStartTime[j] | j in indexJob where o = mappedOrder[j]],
+          [durationJob[j] | j in indexJob where o = mappedOrder[j]]
+      )
+);
 
-% the job schedule must respect the given precedence relation
+% 3) the job schedule must respect the given precedence relation
 constraint forall(p in nprecIndex)
      (no_overlap(jobStartTime[prec[p, 1]], durationJob[prec[p, 1]], jobStartTime[prec[p, 2]]));
 
-% all tasks must have at most L workers
-constraint cumulative(taskStartTime,taskDuration,taskWorkers,L);
+% 4) for each possible time, the running jobs cannot use more than L workers
+% constraint forall(t in 0..makespan)(
+%     sum(j in indexJob where jobStartTime[j] <= t 
+%               /\ jobStartTime[j] + durationJob[j] > t)
+%                    (trab[firstTrabOrder[mappedOrder[j]] + (t - jobStartTime[j])]) <= L
+% );
 
-% constrain task to job and job to task
-constraint forall(j in indexJob) (forall(d in 0..djo[mappedOrder[j]]-1)(taskStartTime[firstTaskJob[j]+d] = jobStartTime[j]+d));
+% The following code is a better approach than the previous
+% 4) for each possible time, the running jobs cannot use more than L workers
+constraint forall(job in indexJob, d in 0..djo[mappedOrder[job]]-1)(
+      let {var int: t = jobStartTime[job] + d} in
+          sum(j in indexJob where jobStartTime[j] <= t 
+                /\ jobStartTime[j] + durationJob[j] > t)
+                     (trab[firstTrabOrder[mappedOrder[j]] + (t - jobStartTime[j])]) <= L
+);
+
+% 5) for each possible time, the running jobs cannot use more than L workers (redundant with constraint 4)
+% constraint cumulative(
+%     [jobStartTime[j] + d | j in indexJob, d in 0..djo[mappedOrder[j]]-1], 
+%     taskDuration, 
+%     taskWorkers, 
+%     L
+% );
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % OPTIMIZATION:                                                                      %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % minimize the time of the last finished job j
-% solve :: int_search(jobStartTime, dom_w_deg, indomain_min, complete) minimize(makespan);  
-
 solve :: seq_search([
-      int_search(jobStartTime, smallest, indomain_min, complete),
-      int_search([makespan], smallest, indomain_min, complete)])
-      minimize(makespan);  % minimize the time of the last finished job j
+          int_search(jobStartTime, dom_w_deg, indomain_min, complete),
+          int_search([makespan], dom_w_deg, indomain_min, complete)
+      ])
+      
+      minimize(makespan);
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % OUTPUT:                                                                            %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 output["\(makespan)\n"];
 output["\(j) \(jobStartTime[j])\n" | j in indexJob];
-%output["Trab\n"];
-%output["\(j) \(mappedJob[j])\n" | j in indexTask];
